@@ -1,12 +1,14 @@
 #![no_std]
+#![forbid(deprecated)]
+#![deny(warnings)]
 
 extern crate embedded_hal as hal;
 
-use hal::digital::OutputPin;
+use hal::digital::v2::OutputPin;
 
-const WIDTH  : u8 = 84;
-const HEIGHT : u8 = 48;
-const ROWS   : u8 = HEIGHT / 8;
+const WIDTH: u8 = 84;
+const HEIGHT: u8 = 48;
+const ROWS: u8 = HEIGHT / 8;
 
 #[repr(u8)]
 pub enum TemperatureCoefficient {
@@ -19,21 +21,29 @@ pub enum TemperatureCoefficient {
 #[repr(u8)]
 pub enum BiasMode {
     Bias1To100 = 0,
-    Bias1To80  = 1,
-    Bias1To65  = 2,
-    Bias1To48  = 3,
-    Bias1To40  = 4,
-    Bias1To24  = 5,
-    Bias1To18  = 6,
-    Bias1To10  = 7,
+    Bias1To80 = 1,
+    Bias1To65 = 2,
+    Bias1To48 = 3,
+    Bias1To40 = 4,
+    Bias1To24 = 5,
+    Bias1To18 = 6,
+    Bias1To10 = 7,
 }
 
 #[repr(u8)]
 pub enum DisplayMode {
-    DisplayBlank     = 0b000,
-    NormalMode       = 0b100,
-    AllSegmentsOn    = 0b001,
+    DisplayBlank = 0b000,
+    NormalMode = 0b100,
+    AllSegmentsOn = 0b001,
     InverseVideoMode = 0b101,
+}
+
+pub struct OutputPinError {}
+
+impl OutputPinError {
+    pub fn new() -> Self {
+        Self {}
+    }
 }
 
 pub struct PCD8544<CLK, DIN, DC, CE, RST, LIGHT>
@@ -55,7 +65,7 @@ where
     entry_mode: bool,
     extended_instruction_set: bool,
     x: u8,
-    y: u8
+    y: u8,
 }
 
 impl<CLK, DIN, DC, CE, RST, LIGHT> PCD8544<CLK, DIN, DC, CE, RST, LIGHT>
@@ -74,70 +84,75 @@ where
         mut ce: CE,
         mut rst: RST,
         light: LIGHT,
-    ) -> PCD8544<CLK, DIN, DC, CE, RST, LIGHT> {
-        clk.set_low();
-        rst.set_low();
-        ce.set_high();
-        PCD8544 {
+    ) -> Result<PCD8544<CLK, DIN, DC, CE, RST, LIGHT>, OutputPinError> {
+        clk.set_low().map_err(|_| OutputPinError::new())?;
+        rst.set_low().map_err(|_| OutputPinError::new())?;
+        ce.set_high().map_err(|_| OutputPinError::new())?;
+        Ok(PCD8544 {
             clk,
             din,
             dc,
             ce,
             rst,
             light,
-            power_down_control:       false,
-            entry_mode:               false,
+            power_down_control: false,
+            entry_mode: false,
             extended_instruction_set: false,
             x: 0,
             y: 0,
-        }
+        })
     }
 
-    pub fn reset(&mut self) {
-        self.rst.set_low();
+    pub fn reset(&mut self) -> Result<(), OutputPinError> {
+        self.rst.set_low().map_err(|_| OutputPinError::new())?;
         self.x = 0;
         self.y = 0;
-        self.init();
+        self.init()?;
+        Ok(())
     }
 
-    pub fn init(&mut self) {
+    pub fn init(&mut self) -> Result<(), OutputPinError> {
         // reset the display
-        self.rst.set_low();
-        self.rst.set_high();
+        self.rst.set_low().map_err(|_| OutputPinError::new())?;
+        self.rst.set_high().map_err(|_| OutputPinError::new())?;
 
         // reset state variables
-        self.power_down_control         = false;
-        self.entry_mode                 = false;
-        self.extended_instruction_set   = false;
+        self.power_down_control = false;
+        self.entry_mode = false;
+        self.extended_instruction_set = false;
 
         // write init configuration
-        self.enable_extended_commands(true);
-        self.set_contrast(56_u8);
-        self.set_temperature_coefficient(TemperatureCoefficient::TC3);
-        self.set_bias_mode(BiasMode::Bias1To40);
-        self.enable_extended_commands(false);
-        self.set_display_mode(DisplayMode::NormalMode);
+        self.enable_extended_commands(true)?;
+        self.set_contrast(56_u8)?;
+        self.set_temperature_coefficient(TemperatureCoefficient::TC3)?;
+        self.set_bias_mode(BiasMode::Bias1To40)?;
+        self.enable_extended_commands(false)?;
+        self.set_display_mode(DisplayMode::NormalMode)?;
 
         // clear display data
-        self.clear();
+        self.clear()?;
+        Ok(())
     }
 
-    pub fn clear(&mut self) {
+    pub fn clear(&mut self) -> Result<(), OutputPinError> {
         for _ in 0..(WIDTH as u16 * ROWS as u16) {
-            self.write_data(0x00);
+            self.write_data(0x00)?;
         }
-        self.set_x_position(0);
-        self.set_y_position(0);
+        self.set_x_position(0)?;
+        self.set_y_position(0)?;
+        Ok(())
     }
 
-    pub fn set_power_down(&mut self, power_down: bool) {
+    pub fn set_power_down(&mut self, power_down: bool) -> Result<(), OutputPinError> {
         self.power_down_control = power_down;
-        self.write_current_function_set();
+        self.write_current_function_set()?;
+        Ok(())
     }
 
-    pub fn set_entry_mode(&mut self, entry_mode: bool) {
+    pub fn set_entry_mode(&mut self, entry_mode: bool) -> Result<(), OutputPinError> {
         self.entry_mode = entry_mode;
-        self.write_current_function_set();
+        self.write_current_function_set()?;
+        Ok(())
     }
 
     pub fn x(&self) -> u8 {
@@ -148,56 +163,67 @@ where
         self.y
     }
 
-    pub fn set_x_position(&mut self, x: u8) {
+    pub fn set_x_position(&mut self, x: u8) -> Result<(), OutputPinError> {
         let x = x % WIDTH;
         self.x = x;
-        self.write_command(0x80 | x);
+        self.write_command(0x80 | x)
     }
 
-    pub fn set_y_position(&mut self, y: u8) {
+    pub fn set_y_position(&mut self, y: u8) -> Result<(), OutputPinError> {
         let y = y % ROWS;
         self.y = y;
-        self.write_command(0x40 | y);
+        self.write_command(0x40 | y)
     }
 
-    pub fn set_light(&mut self, enabled: bool) {
+    pub fn set_light(&mut self, enabled: bool) -> Result<(), OutputPinError> {
         if enabled {
-            self.light.set_low();
+            self.light.set_low().map_err(|_| OutputPinError::new())?;
         } else {
-            self.light.set_high();
+            self.light.set_high().map_err(|_| OutputPinError::new())?;
         }
+        Ok(())
     }
 
-    pub fn set_display_mode(&mut self, mode: DisplayMode) {
-        self.write_command(0x08 | mode as u8);
+    pub fn set_display_mode(&mut self, mode: DisplayMode) -> Result<(), OutputPinError> {
+        self.write_command(0x08 | mode as u8)
     }
 
-    pub fn set_bias_mode(&mut self, bias: BiasMode) {
+    pub fn set_bias_mode(&mut self, bias: BiasMode) -> Result<(), OutputPinError> {
         self.write_command(0x10 | bias as u8)
     }
 
-    pub fn set_temperature_coefficient(&mut self, coefficient: TemperatureCoefficient) {
-        self.write_command(0x04 | coefficient as u8);
+    pub fn set_temperature_coefficient(
+        &mut self,
+        coefficient: TemperatureCoefficient,
+    ) -> Result<(), OutputPinError> {
+        self.write_command(0x04 | coefficient as u8)
     }
 
     /// contrast in range of 0..128
-    pub fn set_contrast(&mut self, contrast: u8) {
-        self.write_command(0x80 | contrast);
+    pub fn set_contrast(&mut self, contrast: u8) -> Result<(), OutputPinError> {
+        self.write_command(0x80 | contrast)
     }
 
-    pub fn enable_extended_commands(&mut self, enable: bool) {
+    pub fn enable_extended_commands(&mut self, enable: bool) -> Result<(), OutputPinError> {
         self.extended_instruction_set = enable;
-        self.write_current_function_set();
+        self.write_current_function_set()?;
+        Ok(())
     }
 
-    fn write_current_function_set(&mut self) {
+    fn write_current_function_set(&mut self) -> Result<(), OutputPinError> {
         let power = self.power_down_control;
         let entry = self.entry_mode;
         let extended = self.extended_instruction_set;
-        self.write_function_set(power, entry, extended);
+        self.write_function_set(power, entry, extended)?;
+        Ok(())
     }
 
-    fn write_function_set(&mut self, power_down_control: bool, entry_mode: bool, extended_instruction_set: bool) {
+    fn write_function_set(
+        &mut self,
+        power_down_control: bool,
+        entry_mode: bool,
+        extended_instruction_set: bool,
+    ) -> Result<(), OutputPinError> {
         let mut val = 0x20;
         if power_down_control {
             val |= 0x04;
@@ -208,32 +234,35 @@ where
         if extended_instruction_set {
             val |= 0x01;
         }
-        self.write_command(val);
+        self.write_command(val)?;
+        Ok(())
     }
 
-
-    pub fn write_command(&mut self, value: u8) {
-        self.write_byte(false, value);
+    pub fn write_command(&mut self, value: u8) -> Result<(), OutputPinError> {
+        self.write_byte(false, value)?;
+        Ok(())
     }
 
-    pub fn write_data(&mut self, value: u8) {
-        self.write_byte(true, value);
+    pub fn write_data(&mut self, value: u8) -> Result<(), OutputPinError> {
+        self.write_byte(true, value)?;
+        Ok(())
     }
 
-    fn write_byte(&mut self, data: bool, value: u8) {
+    fn write_byte(&mut self, data: bool, value: u8) -> Result<(), OutputPinError> {
         let mut value = value;
         if data {
-            self.dc.set_high();
+            self.dc.set_high().map_err(|_| OutputPinError::new())?;
             self.increase_position();
         } else {
-            self.dc.set_low();
+            self.dc.set_low().map_err(|_| OutputPinError::new())?;
         }
-        self.ce.set_low();
+        self.ce.set_low().map_err(|_| OutputPinError::new())?;
         for _ in 0..8 {
-            self.write_bit((value & 0x80) == 0x80);
+            self.write_bit((value & 0x80) == 0x80)?;
             value <<= 1;
         }
-        self.ce.set_high();
+        self.ce.set_high().map_err(|_| OutputPinError::new())?;
+        Ok(())
     }
 
     fn increase_position(&mut self) {
@@ -243,19 +272,19 @@ where
         }
     }
 
-    fn write_bit(&mut self, high: bool) {
+    fn write_bit(&mut self, high: bool) -> Result<(), OutputPinError> {
         if high {
-            self.din.set_high();
+            self.din.set_high().map_err(|_| OutputPinError::new())?;
         } else {
-            self.din.set_low();
+            self.din.set_low().map_err(|_| OutputPinError::new())?;
         }
-        self.clk.set_high();
-        self.clk.set_low();
+        self.clk.set_high().map_err(|_| OutputPinError::new())?;
+        self.clk.set_low().map_err(|_| OutputPinError::new())?;
+        Ok(())
     }
 }
 
-use core::fmt::Write;
-use core::fmt::Result;
+use core::fmt::{self, Write};
 
 fn char_to_bytes(char: char) -> &'static [u8] {
     match char {
@@ -369,20 +398,22 @@ where
     RST: OutputPin,
     LIGHT: OutputPin,
 {
-    fn write_str(&mut self, s: &str) -> Result {
+    fn write_str(&mut self, s: &str) -> fmt::Result {
         for char in s.chars() {
             match char {
-                '\r' => self.set_x_position(0),
+                '\r' => {
+                    self.set_x_position(0).map_err(|_| fmt::Error {})?;
+                }
                 '\n' => {
-                    for _ in 0..(WIDTH-self.x) {
-                        self.write_data(0x00);
+                    for _ in 0..(WIDTH - self.x) {
+                        self.write_data(0x00).map_err(|_| fmt::Error {})?;
                     }
-                },
+                }
                 _ => {
                     for b in char_to_bytes(char) {
-                        self.write_data(*b);
+                        self.write_data(*b).map_err(|_| fmt::Error {})?;
                     }
-                    self.write_data(0x00);
+                    self.write_data(0x00).map_err(|_| fmt::Error {})?;
                 }
             }
         }

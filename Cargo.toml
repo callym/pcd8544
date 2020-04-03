@@ -10,6 +10,5 @@ license = "MIT"
 
 [lib]
 
-[dependencies.embedded-hal]
-features = ["unproven"]
-version = "0.2.1"
+[dependencies]
+embedded-hal = "0.2.3"
