@@ -38,12 +38,22 @@ pub enum DisplayMode {
     InverseVideoMode = 0b101,
 }
 
-pub struct OutputPinError {}
-
-impl OutputPinError {
-    pub fn new() -> Self {
-        Self {}
-    }
+#[derive(Debug)]
+pub enum OutputPinError<CLK, DIN, DC, CE, RST, LIGHT>
+where
+    CLK: OutputPin,
+    DIN: OutputPin,
+    DC: OutputPin,
+    CE: OutputPin,
+    RST: OutputPin,
+    LIGHT: OutputPin,
+{
+    CLKError(CLK::Error),
+    DINError(DIN::Error),
+    DCError(DC::Error),
+    CEError(CE::Error),
+    RSTError(RST::Error),
+    LIGHTError(LIGHT::Error),
 }
 
 pub struct PCD8544<CLK, DIN, DC, CE, RST, LIGHT>
@@ -77,6 +87,11 @@ where
     RST: OutputPin,
     LIGHT: OutputPin,
 {
+    // TODO: somehow add type alias for this, like:
+    //   type Error = OutputPinError<CLK, DIN, DC, CE, RST, LIGHT>;
+    // This is not yet possible, see
+    // https://github.com/rust-lang/rfcs/blob/master/text/0195-associated-items.md
+
     pub fn new(
         mut clk: CLK,
         din: DIN,
@@ -84,10 +99,11 @@ where
         mut ce: CE,
         mut rst: RST,
         light: LIGHT,
-    ) -> Result<PCD8544<CLK, DIN, DC, CE, RST, LIGHT>, OutputPinError> {
-        clk.set_low().map_err(|_| OutputPinError::new())?;
-        rst.set_low().map_err(|_| OutputPinError::new())?;
-        ce.set_high().map_err(|_| OutputPinError::new())?;
+    ) -> Result<PCD8544<CLK, DIN, DC, CE, RST, LIGHT>, OutputPinError<CLK, DIN, DC, CE, RST, LIGHT>>
+    {
+        clk.set_low().map_err(|e| OutputPinError::CLKError(e))?;
+        rst.set_low().map_err(|e| OutputPinError::RSTError(e))?;
+        ce.set_high().map_err(|e| OutputPinError::CEError(e))?;
         Ok(PCD8544 {
             clk,
             din,
@@ -103,18 +119,24 @@ where
         })
     }
 
-    pub fn reset(&mut self) -> Result<(), OutputPinError> {
-        self.rst.set_low().map_err(|_| OutputPinError::new())?;
+    pub fn reset(&mut self) -> Result<(), OutputPinError<CLK, DIN, DC, CE, RST, LIGHT>> {
+        self.rst
+            .set_low()
+            .map_err(|e| OutputPinError::RSTError(e))?;
         self.x = 0;
         self.y = 0;
         self.init()?;
         Ok(())
     }
 
-    pub fn init(&mut self) -> Result<(), OutputPinError> {
+    pub fn init(&mut self) -> Result<(), OutputPinError<CLK, DIN, DC, CE, RST, LIGHT>> {
         // reset the display
-        self.rst.set_low().map_err(|_| OutputPinError::new())?;
-        self.rst.set_high().map_err(|_| OutputPinError::new())?;
+        self.rst
+            .set_low()
+            .map_err(|e| OutputPinError::RSTError(e))?;
+        self.rst
+            .set_high()
+            .map_err(|e| OutputPinError::RSTError(e))?;
 
         // reset state variables
         self.power_down_control = false;
@@ -134,7 +156,7 @@ where
         Ok(())
     }
 
-    pub fn clear(&mut self) -> Result<(), OutputPinError> {
+    pub fn clear(&mut self) -> Result<(), OutputPinError<CLK, DIN, DC, CE, RST, LIGHT>> {
         for _ in 0..(WIDTH as u16 * ROWS as u16) {
             self.write_data(0x00)?;
         }
@@ -143,13 +165,19 @@ where
         Ok(())
     }
 
-    pub fn set_power_down(&mut self, power_down: bool) -> Result<(), OutputPinError> {
+    pub fn set_power_down(
+        &mut self,
+        power_down: bool,
+    ) -> Result<(), OutputPinError<CLK, DIN, DC, CE, RST, LIGHT>> {
         self.power_down_control = power_down;
         self.write_current_function_set()?;
         Ok(())
     }
 
-    pub fn set_entry_mode(&mut self, entry_mode: bool) -> Result<(), OutputPinError> {
+    pub fn set_entry_mode(
+        &mut self,
+        entry_mode: bool,
+    ) -> Result<(), OutputPinError<CLK, DIN, DC, CE, RST, LIGHT>> {
         self.entry_mode = entry_mode;
         self.write_current_function_set()?;
         Ok(())
@@ -163,54 +191,81 @@ where
         self.y
     }
 
-    pub fn set_x_position(&mut self, x: u8) -> Result<(), OutputPinError> {
+    pub fn set_x_position(
+        &mut self,
+        x: u8,
+    ) -> Result<(), OutputPinError<CLK, DIN, DC, CE, RST, LIGHT>> {
         let x = x % WIDTH;
         self.x = x;
         self.write_command(0x80 | x)
     }
 
-    pub fn set_y_position(&mut self, y: u8) -> Result<(), OutputPinError> {
+    pub fn set_y_position(
+        &mut self,
+        y: u8,
+    ) -> Result<(), OutputPinError<CLK, DIN, DC, CE, RST, LIGHT>> {
         let y = y % ROWS;
         self.y = y;
         self.write_command(0x40 | y)
     }
 
-    pub fn set_light(&mut self, enabled: bool) -> Result<(), OutputPinError> {
+    pub fn set_light(
+        &mut self,
+        enabled: bool,
+    ) -> Result<(), OutputPinError<CLK, DIN, DC, CE, RST, LIGHT>> {
         if enabled {
-            self.light.set_low().map_err(|_| OutputPinError::new())?;
+            self.light
+                .set_low()
+                .map_err(|e| OutputPinError::LIGHTError(e))?;
         } else {
-            self.light.set_high().map_err(|_| OutputPinError::new())?;
+            self.light
+                .set_high()
+                .map_err(|e| OutputPinError::LIGHTError(e))?;
         }
         Ok(())
     }
 
-    pub fn set_display_mode(&mut self, mode: DisplayMode) -> Result<(), OutputPinError> {
+    pub fn set_display_mode(
+        &mut self,
+        mode: DisplayMode,
+    ) -> Result<(), OutputPinError<CLK, DIN, DC, CE, RST, LIGHT>> {
         self.write_command(0x08 | mode as u8)
     }
 
-    pub fn set_bias_mode(&mut self, bias: BiasMode) -> Result<(), OutputPinError> {
+    pub fn set_bias_mode(
+        &mut self,
+        bias: BiasMode,
+    ) -> Result<(), OutputPinError<CLK, DIN, DC, CE, RST, LIGHT>> {
         self.write_command(0x10 | bias as u8)
     }
 
     pub fn set_temperature_coefficient(
         &mut self,
         coefficient: TemperatureCoefficient,
-    ) -> Result<(), OutputPinError> {
+    ) -> Result<(), OutputPinError<CLK, DIN, DC, CE, RST, LIGHT>> {
         self.write_command(0x04 | coefficient as u8)
     }
 
     /// contrast in range of 0..128
-    pub fn set_contrast(&mut self, contrast: u8) -> Result<(), OutputPinError> {
+    pub fn set_contrast(
+        &mut self,
+        contrast: u8,
+    ) -> Result<(), OutputPinError<CLK, DIN, DC, CE, RST, LIGHT>> {
         self.write_command(0x80 | contrast)
     }
 
-    pub fn enable_extended_commands(&mut self, enable: bool) -> Result<(), OutputPinError> {
+    pub fn enable_extended_commands(
+        &mut self,
+        enable: bool,
+    ) -> Result<(), OutputPinError<CLK, DIN, DC, CE, RST, LIGHT>> {
         self.extended_instruction_set = enable;
         self.write_current_function_set()?;
         Ok(())
     }
 
-    fn write_current_function_set(&mut self) -> Result<(), OutputPinError> {
+    fn write_current_function_set(
+        &mut self,
+    ) -> Result<(), OutputPinError<CLK, DIN, DC, CE, RST, LIGHT>> {
         let power = self.power_down_control;
         let entry = self.entry_mode;
         let extended = self.extended_instruction_set;
@@ -223,7 +278,7 @@ where
         power_down_control: bool,
         entry_mode: bool,
         extended_instruction_set: bool,
-    ) -> Result<(), OutputPinError> {
+    ) -> Result<(), OutputPinError<CLK, DIN, DC, CE, RST, LIGHT>> {
         let mut val = 0x20;
         if power_down_control {
             val |= 0x04;
@@ -238,30 +293,40 @@ where
         Ok(())
     }
 
-    pub fn write_command(&mut self, value: u8) -> Result<(), OutputPinError> {
+    pub fn write_command(
+        &mut self,
+        value: u8,
+    ) -> Result<(), OutputPinError<CLK, DIN, DC, CE, RST, LIGHT>> {
         self.write_byte(false, value)?;
         Ok(())
     }
 
-    pub fn write_data(&mut self, value: u8) -> Result<(), OutputPinError> {
+    pub fn write_data(
+        &mut self,
+        value: u8,
+    ) -> Result<(), OutputPinError<CLK, DIN, DC, CE, RST, LIGHT>> {
         self.write_byte(true, value)?;
         Ok(())
     }
 
-    fn write_byte(&mut self, data: bool, value: u8) -> Result<(), OutputPinError> {
+    fn write_byte(
+        &mut self,
+        data: bool,
+        value: u8,
+    ) -> Result<(), OutputPinError<CLK, DIN, DC, CE, RST, LIGHT>> {
         let mut value = value;
         if data {
-            self.dc.set_high().map_err(|_| OutputPinError::new())?;
+            self.dc.set_high().map_err(|e| OutputPinError::DCError(e))?;
             self.increase_position();
         } else {
-            self.dc.set_low().map_err(|_| OutputPinError::new())?;
+            self.dc.set_low().map_err(|e| OutputPinError::DCError(e))?;
         }
-        self.ce.set_low().map_err(|_| OutputPinError::new())?;
+        self.ce.set_low().map_err(|e| OutputPinError::CEError(e))?;
         for _ in 0..8 {
             self.write_bit((value & 0x80) == 0x80)?;
             value <<= 1;
         }
-        self.ce.set_high().map_err(|_| OutputPinError::new())?;
+        self.ce.set_high().map_err(|e| OutputPinError::CEError(e))?;
         Ok(())
     }
 
@@ -272,14 +337,25 @@ where
         }
     }
 
-    fn write_bit(&mut self, high: bool) -> Result<(), OutputPinError> {
+    fn write_bit(
+        &mut self,
+        high: bool,
+    ) -> Result<(), OutputPinError<CLK, DIN, DC, CE, RST, LIGHT>> {
         if high {
-            self.din.set_high().map_err(|_| OutputPinError::new())?;
+            self.din
+                .set_high()
+                .map_err(|e| OutputPinError::DINError(e))?;
         } else {
-            self.din.set_low().map_err(|_| OutputPinError::new())?;
+            self.din
+                .set_low()
+                .map_err(|e| OutputPinError::DINError(e))?;
         }
-        self.clk.set_high().map_err(|_| OutputPinError::new())?;
-        self.clk.set_low().map_err(|_| OutputPinError::new())?;
+        self.clk
+            .set_high()
+            .map_err(|e| OutputPinError::CLKError(e))?;
+        self.clk
+            .set_low()
+            .map_err(|e| OutputPinError::CLKError(e))?;
         Ok(())
     }
 }
@@ -418,5 +494,43 @@ where
             }
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    struct BadPin {}
+
+    impl BadPin {
+        fn new() -> Self {
+            Self {}
+        }
+    }
+
+    struct BadPinError {}
+
+    impl OutputPin for BadPin {
+        type Error = BadPinError;
+        fn set_low(&mut self) -> Result<(), Self::Error> {
+            Err(BadPinError {})
+        }
+        fn set_high(&mut self) -> Result<(), Self::Error> {
+            Err(BadPinError {})
+        }
+    }
+
+    #[test]
+    fn errors_basic() {
+        let pcd8544_result = PCD8544::new(
+            BadPin::new(),
+            BadPin::new(),
+            BadPin::new(),
+            BadPin::new(),
+            BadPin::new(),
+            BadPin::new(),
+        );
+        assert!(pcd8544_result.is_err());
     }
 }
