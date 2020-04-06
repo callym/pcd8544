@@ -2,9 +2,7 @@
 #![forbid(deprecated)]
 #![deny(warnings)]
 
-extern crate embedded_hal as hal;
-
-use hal::digital::v2::OutputPin;
+use embedded_hal::digital::v2::OutputPin;
 
 const WIDTH: u8 = 84;
 const HEIGHT: u8 = 48;
