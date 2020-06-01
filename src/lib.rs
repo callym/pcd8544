@@ -2,6 +2,7 @@
 #![forbid(deprecated)]
 #![deny(warnings)]
 
+use embedded_hal::blocking;
 use embedded_hal::digital::v2::OutputPin;
 
 const WIDTH: u8 = 84;
@@ -37,26 +38,23 @@ pub enum DisplayMode {
 }
 
 #[derive(Debug)]
-pub enum OutputPinError<CLKE, DINE, DCE, CEE, RSTE, LIGHTE> {
-    CLKError(CLKE),
-    DINError(DINE),
+pub enum OutputError<SPIE, DCE, CEE, RSTE, LIGHTE> {
+    SPIError(SPIE),
     DCError(DCE),
     CEError(CEE),
     RSTError(RSTE),
     LIGHTError(LIGHTE),
 }
 
-pub struct PCD8544<CLK, DIN, DC, CE, RST, LIGHT>
+pub struct PCD8544<SPI, DC, CE, RST, LIGHT>
 where
-    CLK: OutputPin,
-    DIN: OutputPin,
+    SPI: blocking::spi::Write<u8>,
     DC: OutputPin,
     CE: OutputPin,
     RST: OutputPin,
     LIGHT: OutputPin,
 {
-    clk: CLK,
-    din: DIN,
+    spi: SPI,
     dc: DC,
     ce: CE,
     rst: RST,
@@ -68,37 +66,33 @@ where
     y: u8,
 }
 
-impl<CLK, DIN, DC, CE, RST, LIGHT> PCD8544<CLK, DIN, DC, CE, RST, LIGHT>
+impl<SPI, DC, CE, RST, LIGHT> PCD8544<SPI, DC, CE, RST, LIGHT>
 where
-    CLK: OutputPin,
-    DIN: OutputPin,
+    SPI: blocking::spi::Write<u8>,
     DC: OutputPin,
     CE: OutputPin,
     RST: OutputPin,
     LIGHT: OutputPin,
 {
     // TODO: somehow add type alias for this, like:
-    //   type Error = OutputPinError<CLK::Error, DIN::Error, ...>;
+    //   type Error = OutputError<SPI::Error, DC::Error, ...>;
     // This is not yet possible, see
     // https://github.com/rust-lang/rfcs/blob/master/text/0195-associated-items.md
 
     pub fn new(
-        mut clk: CLK,
-        din: DIN,
+        spi: SPI,
         dc: DC,
         mut ce: CE,
         mut rst: RST,
         light: LIGHT,
     ) -> Result<
-        PCD8544<CLK, DIN, DC, CE, RST, LIGHT>,
-        OutputPinError<CLK::Error, DIN::Error, DC::Error, CE::Error, RST::Error, LIGHT::Error>,
+        PCD8544<SPI, DC, CE, RST, LIGHT>,
+        OutputError<SPI::Error, DC::Error, CE::Error, RST::Error, LIGHT::Error>,
     > {
-        clk.set_low().map_err(|e| OutputPinError::CLKError(e))?;
-        rst.set_low().map_err(|e| OutputPinError::RSTError(e))?;
-        ce.set_high().map_err(|e| OutputPinError::CEError(e))?;
+        rst.set_low().map_err(|e| OutputError::RSTError(e))?;
+        ce.set_high().map_err(|e| OutputError::CEError(e))?;
         Ok(PCD8544 {
-            clk,
-            din,
+            spi,
             dc,
             ce,
             rst,
@@ -113,13 +107,8 @@ where
 
     pub fn reset(
         &mut self,
-    ) -> Result<
-        (),
-        OutputPinError<CLK::Error, DIN::Error, DC::Error, CE::Error, RST::Error, LIGHT::Error>,
-    > {
-        self.rst
-            .set_low()
-            .map_err(|e| OutputPinError::RSTError(e))?;
+    ) -> Result<(), OutputError<SPI::Error, DC::Error, CE::Error, RST::Error, LIGHT::Error>> {
+        self.rst.set_low().map_err(|e| OutputError::RSTError(e))?;
         self.x = 0;
         self.y = 0;
         self.init()?;
@@ -128,17 +117,10 @@ where
 
     pub fn init(
         &mut self,
-    ) -> Result<
-        (),
-        OutputPinError<CLK::Error, DIN::Error, DC::Error, CE::Error, RST::Error, LIGHT::Error>,
-    > {
+    ) -> Result<(), OutputError<SPI::Error, DC::Error, CE::Error, RST::Error, LIGHT::Error>> {
         // reset the display
-        self.rst
-            .set_low()
-            .map_err(|e| OutputPinError::RSTError(e))?;
-        self.rst
-            .set_high()
-            .map_err(|e| OutputPinError::RSTError(e))?;
+        self.rst.set_low().map_err(|e| OutputError::RSTError(e))?;
+        self.rst.set_high().map_err(|e| OutputError::RSTError(e))?;
 
         // reset state variables
         self.power_down_control = false;
@@ -160,10 +142,7 @@ where
 
     pub fn clear(
         &mut self,
-    ) -> Result<
-        (),
-        OutputPinError<CLK::Error, DIN::Error, DC::Error, CE::Error, RST::Error, LIGHT::Error>,
-    > {
+    ) -> Result<(), OutputError<SPI::Error, DC::Error, CE::Error, RST::Error, LIGHT::Error>> {
         for _ in 0..(WIDTH as u16 * ROWS as u16) {
             self.write_data(0x00)?;
         }
@@ -175,10 +154,7 @@ where
     pub fn set_power_down(
         &mut self,
         power_down: bool,
-    ) -> Result<
-        (),
-        OutputPinError<CLK::Error, DIN::Error, DC::Error, CE::Error, RST::Error, LIGHT::Error>,
-    > {
+    ) -> Result<(), OutputError<SPI::Error, DC::Error, CE::Error, RST::Error, LIGHT::Error>> {
         self.power_down_control = power_down;
         self.write_current_function_set()?;
         Ok(())
@@ -187,10 +163,7 @@ where
     pub fn set_entry_mode(
         &mut self,
         entry_mode: bool,
-    ) -> Result<
-        (),
-        OutputPinError<CLK::Error, DIN::Error, DC::Error, CE::Error, RST::Error, LIGHT::Error>,
-    > {
+    ) -> Result<(), OutputError<SPI::Error, DC::Error, CE::Error, RST::Error, LIGHT::Error>> {
         self.entry_mode = entry_mode;
         self.write_current_function_set()?;
         Ok(())
@@ -207,10 +180,7 @@ where
     pub fn set_x_position(
         &mut self,
         x: u8,
-    ) -> Result<
-        (),
-        OutputPinError<CLK::Error, DIN::Error, DC::Error, CE::Error, RST::Error, LIGHT::Error>,
-    > {
+    ) -> Result<(), OutputError<SPI::Error, DC::Error, CE::Error, RST::Error, LIGHT::Error>> {
         let x = x % WIDTH;
         self.x = x;
         self.write_command(0x80 | x)
@@ -219,10 +189,7 @@ where
     pub fn set_y_position(
         &mut self,
         y: u8,
-    ) -> Result<
-        (),
-        OutputPinError<CLK::Error, DIN::Error, DC::Error, CE::Error, RST::Error, LIGHT::Error>,
-    > {
+    ) -> Result<(), OutputError<SPI::Error, DC::Error, CE::Error, RST::Error, LIGHT::Error>> {
         let y = y % ROWS;
         self.y = y;
         self.write_command(0x40 | y)
@@ -231,18 +198,15 @@ where
     pub fn set_light(
         &mut self,
         enabled: bool,
-    ) -> Result<
-        (),
-        OutputPinError<CLK::Error, DIN::Error, DC::Error, CE::Error, RST::Error, LIGHT::Error>,
-    > {
+    ) -> Result<(), OutputError<SPI::Error, DC::Error, CE::Error, RST::Error, LIGHT::Error>> {
         if enabled {
             self.light
                 .set_low()
-                .map_err(|e| OutputPinError::LIGHTError(e))?;
+                .map_err(|e| OutputError::LIGHTError(e))?;
         } else {
             self.light
                 .set_high()
-                .map_err(|e| OutputPinError::LIGHTError(e))?;
+                .map_err(|e| OutputError::LIGHTError(e))?;
         }
         Ok(())
     }
@@ -250,30 +214,21 @@ where
     pub fn set_display_mode(
         &mut self,
         mode: DisplayMode,
-    ) -> Result<
-        (),
-        OutputPinError<CLK::Error, DIN::Error, DC::Error, CE::Error, RST::Error, LIGHT::Error>,
-    > {
+    ) -> Result<(), OutputError<SPI::Error, DC::Error, CE::Error, RST::Error, LIGHT::Error>> {
         self.write_command(0x08 | mode as u8)
     }
 
     pub fn set_bias_mode(
         &mut self,
         bias: BiasMode,
-    ) -> Result<
-        (),
-        OutputPinError<CLK::Error, DIN::Error, DC::Error, CE::Error, RST::Error, LIGHT::Error>,
-    > {
+    ) -> Result<(), OutputError<SPI::Error, DC::Error, CE::Error, RST::Error, LIGHT::Error>> {
         self.write_command(0x10 | bias as u8)
     }
 
     pub fn set_temperature_coefficient(
         &mut self,
         coefficient: TemperatureCoefficient,
-    ) -> Result<
-        (),
-        OutputPinError<CLK::Error, DIN::Error, DC::Error, CE::Error, RST::Error, LIGHT::Error>,
-    > {
+    ) -> Result<(), OutputError<SPI::Error, DC::Error, CE::Error, RST::Error, LIGHT::Error>> {
         self.write_command(0x04 | coefficient as u8)
     }
 
@@ -281,20 +236,14 @@ where
     pub fn set_contrast(
         &mut self,
         contrast: u8,
-    ) -> Result<
-        (),
-        OutputPinError<CLK::Error, DIN::Error, DC::Error, CE::Error, RST::Error, LIGHT::Error>,
-    > {
+    ) -> Result<(), OutputError<SPI::Error, DC::Error, CE::Error, RST::Error, LIGHT::Error>> {
         self.write_command(0x80 | contrast)
     }
 
     pub fn enable_extended_commands(
         &mut self,
         enable: bool,
-    ) -> Result<
-        (),
-        OutputPinError<CLK::Error, DIN::Error, DC::Error, CE::Error, RST::Error, LIGHT::Error>,
-    > {
+    ) -> Result<(), OutputError<SPI::Error, DC::Error, CE::Error, RST::Error, LIGHT::Error>> {
         self.extended_instruction_set = enable;
         self.write_current_function_set()?;
         Ok(())
@@ -302,10 +251,7 @@ where
 
     fn write_current_function_set(
         &mut self,
-    ) -> Result<
-        (),
-        OutputPinError<CLK::Error, DIN::Error, DC::Error, CE::Error, RST::Error, LIGHT::Error>,
-    > {
+    ) -> Result<(), OutputError<SPI::Error, DC::Error, CE::Error, RST::Error, LIGHT::Error>> {
         let power = self.power_down_control;
         let entry = self.entry_mode;
         let extended = self.extended_instruction_set;
@@ -318,10 +264,7 @@ where
         power_down_control: bool,
         entry_mode: bool,
         extended_instruction_set: bool,
-    ) -> Result<
-        (),
-        OutputPinError<CLK::Error, DIN::Error, DC::Error, CE::Error, RST::Error, LIGHT::Error>,
-    > {
+    ) -> Result<(), OutputError<SPI::Error, DC::Error, CE::Error, RST::Error, LIGHT::Error>> {
         let mut val = 0x20;
         if power_down_control {
             val |= 0x04;
@@ -339,10 +282,7 @@ where
     pub fn write_command(
         &mut self,
         value: u8,
-    ) -> Result<
-        (),
-        OutputPinError<CLK::Error, DIN::Error, DC::Error, CE::Error, RST::Error, LIGHT::Error>,
-    > {
+    ) -> Result<(), OutputError<SPI::Error, DC::Error, CE::Error, RST::Error, LIGHT::Error>> {
         self.write_byte(false, value)?;
         Ok(())
     }
@@ -350,10 +290,7 @@ where
     pub fn write_data(
         &mut self,
         value: u8,
-    ) -> Result<
-        (),
-        OutputPinError<CLK::Error, DIN::Error, DC::Error, CE::Error, RST::Error, LIGHT::Error>,
-    > {
+    ) -> Result<(), OutputError<SPI::Error, DC::Error, CE::Error, RST::Error, LIGHT::Error>> {
         self.write_byte(true, value)?;
         Ok(())
     }
@@ -362,23 +299,20 @@ where
         &mut self,
         data: bool,
         value: u8,
-    ) -> Result<
-        (),
-        OutputPinError<CLK::Error, DIN::Error, DC::Error, CE::Error, RST::Error, LIGHT::Error>,
-    > {
-        let mut value = value;
+    ) -> Result<(), OutputError<SPI::Error, DC::Error, CE::Error, RST::Error, LIGHT::Error>> {
         if data {
-            self.dc.set_high().map_err(|e| OutputPinError::DCError(e))?;
+            self.dc.set_high().map_err(|e| OutputError::DCError(e))?;
             self.increase_position();
         } else {
-            self.dc.set_low().map_err(|e| OutputPinError::DCError(e))?;
+            self.dc.set_low().map_err(|e| OutputError::DCError(e))?;
         }
-        self.ce.set_low().map_err(|e| OutputPinError::CEError(e))?;
-        for _ in 0..8 {
-            self.write_bit((value & 0x80) == 0x80)?;
-            value <<= 1;
-        }
-        self.ce.set_high().map_err(|e| OutputPinError::CEError(e))?;
+        self.ce.set_low().map_err(|e| OutputError::CEError(e))?;
+
+        self.spi
+            .write(&[value])
+            .map_err(|e| OutputError::SPIError(e))?;
+
+        self.ce.set_high().map_err(|e| OutputError::CEError(e))?;
         Ok(())
     }
 
@@ -387,31 +321,6 @@ where
         if self.x == 0 {
             self.y = (self.y + 1) & ROWS;
         }
-    }
-
-    fn write_bit(
-        &mut self,
-        high: bool,
-    ) -> Result<
-        (),
-        OutputPinError<CLK::Error, DIN::Error, DC::Error, CE::Error, RST::Error, LIGHT::Error>,
-    > {
-        if high {
-            self.din
-                .set_high()
-                .map_err(|e| OutputPinError::DINError(e))?;
-        } else {
-            self.din
-                .set_low()
-                .map_err(|e| OutputPinError::DINError(e))?;
-        }
-        self.clk
-            .set_high()
-            .map_err(|e| OutputPinError::CLKError(e))?;
-        self.clk
-            .set_low()
-            .map_err(|e| OutputPinError::CLKError(e))?;
-        Ok(())
     }
 }
 
@@ -520,10 +429,9 @@ fn char_to_bytes(char: char) -> &'static [u8] {
     }
 }
 
-impl<CLK, DIN, DC, CE, RST, LIGHT> Write for PCD8544<CLK, DIN, DC, CE, RST, LIGHT>
+impl<SPI, DC, CE, RST, LIGHT> Write for PCD8544<SPI, DC, CE, RST, LIGHT>
 where
-    CLK: OutputPin,
-    DIN: OutputPin,
+    SPI: blocking::spi::Write<u8>,
     DC: OutputPin,
     CE: OutputPin,
     RST: OutputPin,
