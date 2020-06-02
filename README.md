@@ -6,10 +6,10 @@ fn main() -> ! {
     let mut cp: cortex_m::Peripherals = cortex_m::Peripherals::take().unwrap();
     let mut peripherals = stm32f103xx::Peripherals::take().unwrap();
     let mut rcc = peripherals.RCC.constrain();
-    
+
     let mut gpioa = peripherals.GPIOA.split(&mut rcc.apb2);
     let mut gpiob = peripherals.GPIOB.split(&mut rcc.apb2);
-    
+
     let mut pcd_gnd   = gpiob.pb12.into_push_pull_output(&mut gpiob.crh);
     let mut pcd_light = gpiob.pb13.into_push_pull_output(&mut gpiob.crh);
     let mut pcd_vcc   = gpiob.pb14.into_push_pull_output(&mut gpiob.crh);
@@ -35,12 +35,16 @@ fn main() -> ! {
 
     display.reset();
     writeln!(display, "Hello World");
-    
+
     loop {}
 }
 ```
 The code from the example is copy&pasted from a working project, but not tested in this specific combination.
 #### In action
 The picture below shows the display to display the temperature from the [onewire](https://github.com/kellerkindt/onewire/) [ds18b20](https://datasheets.maximintegrated.com/en/ds/DS18B20.pdf) sensor.
- 
-![](pcd8544.jpg) 
+
+![](pcd8544.jpg)
+
+# Changes in this fork
+
+See [changelog](./CHANGELOG.md).
