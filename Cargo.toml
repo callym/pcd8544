@@ -13,3 +13,15 @@ license = "MIT"
 
 [dependencies]
 embedded-hal = "0.2.3"
+embedded-graphics = "0.6.2"
+
+[dev-dependencies]
+cortex-m = "^0.6.3"
+cortex-m-rt = "^0.6.12"
+embedded-hal = "^0.2.4"
+rtt-target = { version = "0.2", features = ["cortex-m"] }
+panic-rtt-target = { version = "0.1", features = ["cortex-m"] }
+
+[dev-dependencies.stm32f1xx-hal]
+features = ["stm32f103", "rt", "medium"]
+version = "^0.6.1"
